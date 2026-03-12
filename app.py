@@ -111,7 +111,7 @@ elif modo == "🚚 Traslados":
             if not idx_d.empty:
                 df.at[idx_d[0], 'stock'] += cant
             else:
-                nueva = {'local': destino, 'tela': fila_o['tela'], 'prenda': p_t, 'talla': t_t, 'color': c_t, 'stock': cant}
+                nueva = {'local': destino, 'prenda': p_t, 'talla': t_t, 'color': c_t, 'stock': cant}
                 df = pd.concat([df, pd.DataFrame([nueva])], ignore_index=True)
             
             conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
@@ -120,39 +120,57 @@ elif modo == "🚚 Traslados":
             st.cache_data.clear()
             st.rerun()
 
-# --- 6. MODO: TALLER ---
+# --- 6. MODO: TALLER (CON REPOSICIÓN) ---
 elif modo == "🏭 Taller":
-    st.header("🏭 Producción")
-    with st.form("crear_taller"):
-        np = st.text_input("Prenda").upper()
-        nta = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
-        nc = st.text_input("Color").upper()
-        ns = st.number_input("Stock", min_value=1)
-        if st.form_submit_button("Registrar Producción"):
-            nf = {'local': 'Taller', 'prenda': np, 'talla': nta, 'color': nc, 'stock': ns}
-            df = pd.concat([df, pd.DataFrame([nf])], ignore_index=True)
-            conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-            registrar_log("Producción", "Taller", np, nta, nc, ns)
-            st.success("Añadido")
-            st.cache_data.clear()
-            st.rerun()
+    st.header("🏭 Gestión de Producción")
+    tab1, tab2 = st.tabs(["📥 Reponer Stock (Existente)", "➕ Nueva Prenda (Crear)"])
+    
+    with tab1:
+        st.subheader("Sumar mercadería a modelos existentes")
+        df_taller = df[df['local'] == "Taller"]
+        if not df_taller.empty:
+            p_ex = st.selectbox("Modelo en Taller:", sorted(df_taller['prenda'].unique()))
+            df_p_ex = df_taller[df_taller['prenda'] == p_ex]
+            t_ex = st.selectbox("Talla:", sorted(df_p_ex['talla'].unique()), key="t_ex_rep")
+            c_ex = st.selectbox("Color:", sorted(df_p_ex[df_p_ex['talla'] == t_ex]['color'].unique()), key="c_ex_rep")
+            
+            cant_rep = st.number_input("Cantidad Producida:", min_value=1, value=1, key="cant_rep")
+            if st.button("📥 Confirmar Ingreso"):
+                # Buscar índice exacto
+                idx_rep = df[(df['local'] == "Taller") & (df['prenda'] == p_ex) & (df['talla'] == t_ex) & (df['color'] == c_ex)].index[0]
+                df.at[idx_rep, 'stock'] += cant_rep
+                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
+                registrar_log("Producción (Repuesto)", "Taller", p_ex, t_ex, c_ex, cant_rep)
+                st.success(f"Se sumaron {cant_rep} unidades a {p_ex}")
+                st.cache_data.clear()
+                st.rerun()
+        else:
+            st.warning("No hay prendas registradas en el Taller.")
 
-# --- 7. MODO: VER HISTORIAL Y DESCARGAR ---
+    with tab2:
+        st.subheader("Crear un nuevo modelo o variante")
+        with st.form("crear_taller_nuevo"):
+            np = st.text_input("Nombre de la Prenda").upper()
+            nta = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
+            nc = st.text_input("Color").upper()
+            ns = st.number_input("Stock Inicial", min_value=1)
+            if st.form_submit_button("➕ Crear y Registrar"):
+                nf = {'local': 'Taller', 'prenda': np, 'talla': nta, 'color': nc, 'stock': ns}
+                df = pd.concat([df, pd.DataFrame([nf])], ignore_index=True)
+                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
+                registrar_log("Producción (Nuevo)", "Taller", np, nta, nc, ns)
+                st.success("Nueva prenda añadida al Taller")
+                st.cache_data.clear()
+                st.rerun()
+
+# --- 7. MODO: VER HISTORIAL ---
 elif modo == "📜 Ver Historial":
     st.header("📜 Registro de Movimientos")
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
         h_df = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
-        
-        # Botón para descargar
         csv = h_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Descargar Historial (Excel/CSV)",
-            data=csv,
-            file_name=f"historial_inventario_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime='text/csv',
-        )
-        
+        st.download_button(label="📥 Descargar CSV", data=csv, file_name="historial.csv", mime='text/csv')
         st.dataframe(h_df.sort_index(ascending=False), use_container_width=True)
     except:
-        st.warning("Recuerda crear la hoja 'historial' en tu Google Sheet para activar esta función.")
+        st.warning("Asegúrate de tener la pestaña 'historial' en tu Excel.")
