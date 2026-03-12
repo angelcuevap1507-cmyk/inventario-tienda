@@ -51,7 +51,7 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.rerun()
 
-# --- 4. MODO: STOCK ---
+# --- 4. MODO: STOCK (MUESTRA TODO CON AVISO AGOTADO) ---
 if modo == "📦 Stock Tiendas":
     local_sel = st.selectbox("📍 Selecciona Local:", sorted(df['local'].unique()))
     df_local = df[df['local'] == local_sel]
@@ -75,7 +75,7 @@ if modo == "📦 Stock Tiendas":
             st.cache_data.clear()
             st.rerun()
 
-# --- 5. MODO: TRASLADOS (MUESTRA TODO CON ADVERTENCIA) ---
+# --- 5. MODO: TRASLADOS RÁPIDOS (FILTRO SOLO COLORES CON STOCK) ---
 elif modo == "🚚 Traslados Rápidos":
     st.header("🚚 Traslado de Mercadería")
     inst = st.text_input("Escribe o dicta: (Ej: De taller a moda palazo talla XL negro 5)").lower()
@@ -98,26 +98,30 @@ elif modo == "🚚 Traslados Rápidos":
     origen = c1.selectbox("Desde:", sorted(df['local'].unique()), index=sorted(df['local'].unique()).index(s_orig) if s_orig in df['local'].unique() else 0)
     destino = c2.selectbox("Hacia:", [l for l in sorted(df['local'].unique()) if l != origen], index=0)
     
-    df_o = df[df['local'] == origen]
-    p_t = st.selectbox("Prenda:", sorted(df_o['prenda'].unique()), index=sorted(df_o['prenda'].unique()).index(s_prenda) if s_prenda in df_o['prenda'].unique() else 0)
-    df_prenda = df_o[df_o['prenda'] == p_t]
-    t_t = st.selectbox("Talla:", sorted(df_prenda['talla'].unique()))
-    c_t = st.selectbox("Color:", sorted(df_prenda[df_prenda['talla'] == t_t]['color'].unique()))
+    # Mostrar prendas que tengan al menos 1 unidad en stock
+    df_o = df[(df['local'] == origen) & (df['stock'] > 0)]
     
-    fila_o = df_prenda[(df_prenda['talla'] == t_t) & (df_prenda['color'] == c_t)].iloc[0]
-    stock_actual = int(fila_o['stock'])
-    
-    if stock_actual <= 0:
-        st.error(f"⚠️ No hay stock de esta prenda en {origen}.")
-        st.button("🚀 Confirmar Traslado", disabled=True)
-    else:
-        st.success(f"Stock disponible: {stock_actual}")
+    if not df_o.empty:
+        p_t = st.selectbox("Prenda:", sorted(df_o['prenda'].unique()), index=sorted(df_o['prenda'].unique()).index(s_prenda) if s_prenda in df_o['prenda'].unique() else 0)
+        df_prenda = df_o[df_o['prenda'] == p_t]
+        
+        t_t = st.selectbox("Talla:", sorted(df_prenda['talla'].unique()))
+        
+        # FILTRO CRÍTICO: Solo colores con stock > 0 para esa prenda y talla
+        colores_con_stock = sorted(df_prenda[df_prenda['talla'] == t_t]['color'].unique())
+        c_t = st.selectbox("Color disponible:", colores_con_stock)
+        
+        fila_o = df_prenda[(df_prenda['talla'] == t_t) & (df_prenda['color'] == c_t)].iloc[0]
+        stock_actual = int(fila_o['stock'])
+        
+        st.success(f"Stock disponible para trasladar: {stock_actual}")
         cant = st.number_input("Cantidad:", min_value=1, max_value=stock_actual, value=min(s_cant, stock_actual))
+        
         if st.button("🚀 Confirmar Traslado"):
             df.at[fila_o.name, 'stock'] -= cant
-            idx_d = df[(df['local'] == destino) & (df['prenda'] == p_t) & (df['talla'] == t_t) & (df['color'] == c_t)].index
-            if not idx_d.empty:
-                df.at[idx_d[0], 'stock'] += cant
+            idx_dest = df[(df['local'] == destino) & (df['prenda'] == p_t) & (df['talla'] == t_t) & (df['color'] == c_t)].index
+            if not idx_dest.empty:
+                df.at[idx_dest[0], 'stock'] += cant
             else:
                 nueva = {'local': destino, 'tela': fila_o['tela'], 'prenda': p_t, 'talla': t_t, 'color': c_t, 'stock': cant, 'precio_unitario': fila_o.get('precio_unitario', 0), 'precio_mayorista': 0}
                 df = pd.concat([df, pd.DataFrame([nueva])], ignore_index=True)
@@ -125,6 +129,8 @@ elif modo == "🚚 Traslados Rápidos":
             st.success("Traslado Exitoso")
             st.cache_data.clear()
             st.rerun()
+    else:
+        st.error(f"⚠️ El local {origen} no tiene ninguna prenda con stock para trasladar.")
 
 # --- 6. MODO: TALLER ---
 else:
@@ -134,8 +140,9 @@ else:
         df_t = df[df['local'] == "Taller"]
         if not df_t.empty:
             p = st.selectbox("Modelo:", sorted(df_t['prenda'].unique()))
-            t = st.selectbox("Talla:", sorted(df_t[df_t['prenda'] == p]['talla'].unique()))
-            c = st.selectbox("Color:", sorted(df_t[(df_t['prenda'] == p) & (df_t['talla'] == t)]['color'].unique()))
+            df_p_t = df_t[df_t['prenda'] == p]
+            t = st.selectbox("Talla:", sorted(df_p_t['talla'].unique()))
+            c = st.selectbox("Color:", sorted(df_p_t[df_p_t['talla'] == t]['color'].unique()))
             cant_t = st.number_input("Cantidad Producida:", min_value=1, value=12)
             if st.button("Sumar al Taller"):
                 idx = df[(df['local'] == "Taller") & (df['prenda'] == p) & (df['talla'] == t) & (df['color'] == c)].index[0]
@@ -148,7 +155,6 @@ else:
         with st.form("crear"):
             c1, c2 = st.columns(2); np = c1.text_input("Prenda").upper(); nt = c2.text_input("Tela", value="General")
             c3, c4 = st.columns(2)
-            # AQUÍ SE AGREGÓ LA TALLA XL
             nta = c3.selectbox("Talla:", ["ST", "S", "M", "L", "XL"])
             nc = c4.text_input("Color").upper()
             ns = st.number_input("Stock", min_value=1); pu = st.number_input("Precio Unidad", min_value=0.0)
