@@ -51,10 +51,10 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.rerun()
 
-# --- 4. MODO: STOCK (MUESTRA TODO) ---
+# --- 4. MODO: STOCK ---
 if modo == "📦 Stock Tiendas":
     local_sel = st.selectbox("📍 Selecciona Local:", sorted(df['local'].unique()))
-    df_local = df[df['local'] == local_sel] # QUITADO EL FILTRO DE STOCK > 0
+    df_local = df[df['local'] == local_sel]
     prenda_sel = st.selectbox("👕 Prenda:", sorted(df_local['prenda'].unique()))
     df_p = df_local[df_local['prenda'] == prenda_sel]
     talla_sel = st.radio("📏 Talla:", sorted(df_p['talla'].unique()), horizontal=True)
@@ -62,16 +62,12 @@ if modo == "📦 Stock Tiendas":
     for idx, row in df_p[df_p['talla'] == talla_sel].iterrows():
         c1, c2, c3 = st.columns([3, 1, 1])
         color_display = row['color'].upper()
-        
-        # Alerta visual si está en cero
         if row['stock'] <= 0:
             c1.markdown(f"**{color_display}** <span style='color:red;'>(AGOTADO)</span>", unsafe_allow_html=True)
         else:
             c1.write(f"**{color_display}**")
-            
         c2.metric("Stock", int(row['stock']))
         adj = c3.number_input("Venta/Ajuste", value=0, key=f"adj_{idx}")
-        
         if st.button("Actualizar", key=f"btn_{idx}"):
             df.at[idx, 'stock'] += adj
             conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
@@ -82,7 +78,7 @@ if modo == "📦 Stock Tiendas":
 # --- 5. MODO: TRASLADOS (MUESTRA TODO CON ADVERTENCIA) ---
 elif modo == "🚚 Traslados Rápidos":
     st.header("🚚 Traslado de Mercadería")
-    inst = st.text_input("Escribe o dicta: (Ej: De taller a moda palazo ST negro 5)").lower()
+    inst = st.text_input("Escribe o dicta: (Ej: De taller a moda palazo talla XL negro 5)").lower()
     
     s_orig, s_dest, s_prenda, s_talla, s_color, s_cant = None, None, None, None, None, 1
     if inst:
@@ -102,7 +98,7 @@ elif modo == "🚚 Traslados Rápidos":
     origen = c1.selectbox("Desde:", sorted(df['local'].unique()), index=sorted(df['local'].unique()).index(s_orig) if s_orig in df['local'].unique() else 0)
     destino = c2.selectbox("Hacia:", [l for l in sorted(df['local'].unique()) if l != origen], index=0)
     
-    df_o = df[df['local'] == origen] # MUESTRA TODAS LAS PRENDAS DEL ORIGEN
+    df_o = df[df['local'] == origen]
     p_t = st.selectbox("Prenda:", sorted(df_o['prenda'].unique()), index=sorted(df_o['prenda'].unique()).index(s_prenda) if s_prenda in df_o['prenda'].unique() else 0)
     df_prenda = df_o[df_o['prenda'] == p_t]
     t_t = st.selectbox("Talla:", sorted(df_prenda['talla'].unique()))
@@ -112,8 +108,7 @@ elif modo == "🚚 Traslados Rápidos":
     stock_actual = int(fila_o['stock'])
     
     if stock_actual <= 0:
-        st.error(f"⚠️ No hay stock de esta prenda en {origen}. No se puede trasladar.")
-        cant = st.number_input("Cantidad:", value=0, disabled=True)
+        st.error(f"⚠️ No hay stock de esta prenda en {origen}.")
         st.button("🚀 Confirmar Traslado", disabled=True)
     else:
         st.success(f"Stock disponible: {stock_actual}")
@@ -122,7 +117,7 @@ elif modo == "🚚 Traslados Rápidos":
             df.at[fila_o.name, 'stock'] -= cant
             idx_d = df[(df['local'] == destino) & (df['prenda'] == p_t) & (df['talla'] == t_t) & (df['color'] == c_t)].index
             if not idx_d.empty:
-                df.at[idx_dest[0], 'stock'] += cant
+                df.at[idx_d[0], 'stock'] += cant
             else:
                 nueva = {'local': destino, 'tela': fila_o['tela'], 'prenda': p_t, 'talla': t_t, 'color': c_t, 'stock': cant, 'precio_unitario': fila_o.get('precio_unitario', 0), 'precio_mayorista': 0}
                 df = pd.concat([df, pd.DataFrame([nueva])], ignore_index=True)
@@ -131,7 +126,7 @@ elif modo == "🚚 Traslados Rápidos":
             st.cache_data.clear()
             st.rerun()
 
-# --- 6. MODO: TALLER (SE MANTIENE IGUAL) ---
+# --- 6. MODO: TALLER ---
 else:
     st.header("🏭 Gestión Taller")
     t1, t2 = st.tabs(["📥 Agregar Stock", "➕ Nueva Prenda"])
@@ -140,24 +135,4 @@ else:
         if not df_t.empty:
             p = st.selectbox("Modelo:", sorted(df_t['prenda'].unique()))
             t = st.selectbox("Talla:", sorted(df_t[df_t['prenda'] == p]['talla'].unique()))
-            c = st.selectbox("Color:", sorted(df_t[(df_t['prenda'] == p) & (df_t['talla'] == t)]['color'].unique()))
-            cant_t = st.number_input("Cantidad Producida:", min_value=1, value=12)
-            if st.button("Sumar al Taller"):
-                idx = df[(df['local'] == "Taller") & (df['prenda'] == p) & (df['talla'] == t) & (df['color'] == c)].index[0]
-                df.at[idx, 'stock'] += cant_t
-                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                st.success("Stock Añadido")
-                st.cache_data.clear()
-                st.rerun()
-    with t2:
-        with st.form("crear"):
-            c1, c2 = st.columns(2); np = c1.text_input("Prenda").upper(); nt = c2.text_input("Tela", value="General")
-            c3, c4 = st.columns(2); nta = c3.selectbox("Talla", ["ST", "S", "M", "L"]); nc = c4.text_input("Color").upper()
-            ns = st.number_input("Stock", min_value=1); pu = st.number_input("Precio Unidad", min_value=0.0)
-            if st.form_submit_button("Crear y Registrar"):
-                nf = {'local': 'Taller', 'tela': nt, 'prenda': np, 'talla': nta, 'color': nc, 'stock': ns, 'precio_unitario': pu, 'precio_mayorista': 0}
-                df = pd.concat([df, pd.DataFrame([nf])], ignore_index=True)
-                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                st.success("Prenda Creada")
-                st.cache_data.clear()
-                st.rerun()
+            c = st.selectbox("
