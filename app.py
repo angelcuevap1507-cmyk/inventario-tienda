@@ -25,7 +25,7 @@ if not st.session_state.logged_in:
                     st.error("Credenciales incorrectas")
     st.stop()
 
-# --- 2. CONEXIÓN Y FUNCIONES DE REGISTRO ---
+# --- 2. CONEXIÓN Y REGISTRO ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=300)
@@ -38,7 +38,6 @@ def cargar_datos():
 def registrar_log(tipo, local, prenda, talla, color, cant):
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-        # Cargamos el historial actual
         logs = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
         ahora = datetime.now()
         nueva_fila = pd.DataFrame([{
@@ -54,7 +53,7 @@ def registrar_log(tipo, local, prenda, talla, color, cant):
         logs_actualizados = pd.concat([logs, nueva_fila], ignore_index=True)
         conn.update(spreadsheet=url, worksheet="historial", data=logs_actualizados)
     except Exception as e:
-        st.error(f"Error al registrar log: {e}")
+        st.error(f"Error al registrar historial: {e}")
 
 df = cargar_datos()
 
@@ -86,8 +85,8 @@ if modo == "📦 Stock Tiendas":
         if st.button("Guardar", key=f"btn_{idx}"):
             df.at[idx, 'stock'] += adj
             conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-            registrar_log("Ajuste/Venta", local_sel, prenda_sel, talla_sel, row['color'], adj)
-            st.success("Registrado")
+            registrar_log("Venta/Ajuste", local_sel, prenda_sel, talla_sel, row['color'], adj)
+            st.success("Guardado")
             st.cache_data.clear()
             st.rerun()
 
@@ -117,7 +116,7 @@ elif modo == "🚚 Traslados":
             
             conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
             registrar_log("Traslado", f"{origen} -> {destino}", p_t, t_t, c_t, cant)
-            st.success("Traslado registrado en historial")
+            st.success("Traslado Exitoso")
             st.cache_data.clear()
             st.rerun()
 
@@ -134,16 +133,26 @@ elif modo == "🏭 Taller":
             df = pd.concat([df, pd.DataFrame([nf])], ignore_index=True)
             conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
             registrar_log("Producción", "Taller", np, nta, nc, ns)
-            st.success("Añadido al historial")
+            st.success("Añadido")
             st.cache_data.clear()
             st.rerun()
 
-# --- 7. MODO: VER HISTORIAL ---
+# --- 7. MODO: VER HISTORIAL Y DESCARGAR ---
 elif modo == "📜 Ver Historial":
     st.header("📜 Registro de Movimientos")
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
         h_df = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
+        
+        # Botón para descargar
+        csv = h_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Descargar Historial (Excel/CSV)",
+            data=csv,
+            file_name=f"historial_inventario_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime='text/csv',
+        )
+        
         st.dataframe(h_df.sort_index(ascending=False), use_container_width=True)
     except:
-        st.warning("Crea la hoja 'historial' en tu Excel para ver los datos.")
+        st.warning("Recuerda crear la hoja 'historial' en tu Google Sheet para activar esta función.")
