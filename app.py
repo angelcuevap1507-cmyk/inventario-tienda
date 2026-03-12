@@ -51,7 +51,7 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.rerun()
 
-# --- 4. MODO: STOCK (MUESTRA TODO CON AVISO AGOTADO) ---
+# --- 4. MODO: STOCK (ORDENADO: CON STOCK A-Z -> SIN STOCK A-Z) ---
 if modo == "📦 Stock Tiendas":
     local_sel = st.selectbox("📍 Selecciona Local:", sorted(df['local'].unique()))
     df_local = df[df['local'] == local_sel]
@@ -59,7 +59,14 @@ if modo == "📦 Stock Tiendas":
     df_p = df_local[df_local['prenda'] == prenda_sel]
     talla_sel = st.radio("📏 Talla:", sorted(df_p['talla'].unique()), horizontal=True)
     
-    for idx, row in df_p[df_p['talla'] == talla_sel].iterrows():
+    # --- LÓGICA DE ORDENAMIENTO ---
+    df_talla = df_p[df_p['talla'] == talla_sel].copy()
+    # Creamos una columna temporal para priorizar (1 si tiene stock, 0 si no)
+    df_talla['prioridad'] = df_talla['stock'].apply(lambda x: 1 if x > 0 else 0)
+    # Ordenamos: primero prioridad (descendente), luego color (ascendente)
+    df_ordenado = df_talla.sort_values(by=['prioridad', 'color'], ascending=[False, True])
+    
+    for idx, row in df_ordenado.iterrows():
         c1, c2, c3 = st.columns([3, 1, 1])
         color_display = row['color'].upper()
         if row['stock'] <= 0:
@@ -75,7 +82,7 @@ if modo == "📦 Stock Tiendas":
             st.cache_data.clear()
             st.rerun()
 
-# --- 5. MODO: TRASLADOS RÁPIDOS (FILTRO SOLO COLORES CON STOCK) ---
+# --- 5. MODO: TRASLADOS RÁPIDOS ---
 elif modo == "🚚 Traslados Rápidos":
     st.header("🚚 Traslado de Mercadería")
     inst = st.text_input("Escribe o dicta: (Ej: De taller a moda palazo talla XL negro 5)").lower()
@@ -98,16 +105,14 @@ elif modo == "🚚 Traslados Rápidos":
     origen = c1.selectbox("Desde:", sorted(df['local'].unique()), index=sorted(df['local'].unique()).index(s_orig) if s_orig in df['local'].unique() else 0)
     destino = c2.selectbox("Hacia:", [l for l in sorted(df['local'].unique()) if l != origen], index=0)
     
-    # Mostrar prendas que tengan al menos 1 unidad en stock
     df_o = df[(df['local'] == origen) & (df['stock'] > 0)]
     
     if not df_o.empty:
         p_t = st.selectbox("Prenda:", sorted(df_o['prenda'].unique()), index=sorted(df_o['prenda'].unique()).index(s_prenda) if s_prenda in df_o['prenda'].unique() else 0)
         df_prenda = df_o[df_o['prenda'] == p_t]
-        
         t_t = st.selectbox("Talla:", sorted(df_prenda['talla'].unique()))
         
-        # FILTRO CRÍTICO: Solo colores con stock > 0 para esa prenda y talla
+        # En traslados seguimos mostrando solo lo que tiene stock, ordenado A-Z
         colores_con_stock = sorted(df_prenda[df_prenda['talla'] == t_t]['color'].unique())
         c_t = st.selectbox("Color disponible:", colores_con_stock)
         
@@ -130,7 +135,7 @@ elif modo == "🚚 Traslados Rápidos":
             st.cache_data.clear()
             st.rerun()
     else:
-        st.error(f"⚠️ El local {origen} no tiene ninguna prenda con stock para trasladar.")
+        st.error(f"⚠️ El local {origen} no tiene stock.")
 
 # --- 6. MODO: TALLER ---
 else:
@@ -142,6 +147,7 @@ else:
             p = st.selectbox("Modelo:", sorted(df_t['prenda'].unique()))
             df_p_t = df_t[df_t['prenda'] == p]
             t = st.selectbox("Talla:", sorted(df_p_t['talla'].unique()))
+            # Ordenamos colores en el taller también
             c = st.selectbox("Color:", sorted(df_p_t[df_p_t['talla'] == t]['color'].unique()))
             cant_t = st.number_input("Cantidad Producida:", min_value=1, value=12)
             if st.button("Sumar al Taller"):
