@@ -135,4 +135,27 @@ else:
         if not df_t.empty:
             p = st.selectbox("Modelo:", sorted(df_t['prenda'].unique()))
             t = st.selectbox("Talla:", sorted(df_t[df_t['prenda'] == p]['talla'].unique()))
-            c = st.selectbox("
+            c = st.selectbox("Color:", sorted(df_t[(df_t['prenda'] == p) & (df_t['talla'] == t)]['color'].unique()))
+            cant_t = st.number_input("Cantidad Producida:", min_value=1, value=12)
+            if st.button("Sumar al Taller"):
+                idx = df[(df['local'] == "Taller") & (df['prenda'] == p) & (df['talla'] == t) & (df['color'] == c)].index[0]
+                df.at[idx, 'stock'] += cant_t
+                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
+                st.success("Stock Añadido")
+                st.cache_data.clear()
+                st.rerun()
+    with t2:
+        with st.form("crear"):
+            c1, c2 = st.columns(2); np = c1.text_input("Prenda").upper(); nt = c2.text_input("Tela", value="General")
+            c3, c4 = st.columns(2)
+            # AQUÍ SE AGREGÓ LA TALLA XL
+            nta = c3.selectbox("Talla:", ["ST", "S", "M", "L", "XL"])
+            nc = c4.text_input("Color").upper()
+            ns = st.number_input("Stock", min_value=1); pu = st.number_input("Precio Unidad", min_value=0.0)
+            if st.form_submit_button("Crear y Registrar"):
+                nf = {'local': 'Taller', 'tela': nt, 'prenda': np, 'talla': nta, 'color': nc, 'stock': ns, 'precio_unitario': pu, 'precio_mayorista': 0}
+                df = pd.concat([df, pd.DataFrame([nf])], ignore_index=True)
+                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
+                st.success("Prenda Creada")
+                st.cache_data.clear()
+                st.rerun()
