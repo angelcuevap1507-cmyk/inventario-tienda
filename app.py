@@ -80,35 +80,40 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.rerun()
 
-# --- 4. MODO: STOCK ---
-if "Stock" in modo:
-    st.header(f"📦 Inventario {st.session_state.tienda_asignada if st.session_state.role == 'user' else 'Global'}")
-    local_sel = st.session_state.tienda_asignada if st.session_state.role == "user" else st.selectbox("📍 Local:", sorted(df['local'].unique()))
-    df_l = df[df['local'].str.upper() == local_sel.upper()]
-    if not df_l.empty:
-        prenda_sel = st.selectbox("👕 Prenda:", sorted(df_l['prenda'].unique()))
-        df_p = df_l[df_l['prenda'] == prenda_sel]
-        talla_sel = st.radio("📏 Talla:", sorted(df_p['talla'].unique()), horizontal=True)
-        df_ord = df_p[df_p['talla'] == talla_sel].copy().sort_values(by=['stock', 'color'], ascending=[False, True])
-        for idx, row in df_ord.iterrows():
-            st.divider()
-            c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-            c1.write(f"**{row['color'].upper()}**" if row['stock'] > 0 else f"**{row['color'].upper()}** (AGOTADO)")
-            c2.metric("Stock", int(row['stock']))
-            adj = c3.number_input("Venta", value=0, key=f"adj_{idx}")
-            if c3.button("Guardar", key=f"btn_v_{idx}"):
-                df.at[idx, 'stock'] += adj
-                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                registrar_log("Venta", local_sel, prenda_sel, talla_sel, row['color'], adj)
-                st.cache_data.clear(); st.rerun()
-            if st.session_state.role == "admin":
-                fix = c4.number_input("Fix", value=int(row['stock']), key=f"fix_{idx}")
-                if c4.button("Fix", key=f"btn_f_{idx}"):
-                    df.at[idx, 'stock'] = fix
-                    conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                    registrar_log("FIX", local_sel, prenda_sel, talla_sel, row['color'], fix - row['stock'])
-                    st.cache_data.clear(); st.rerun()
+# --- 4. LÓGICA DE MÓDULOS (CORREGIDA) ---
 
+# IMPORTANTE: Cambiamos el orden para que "Alertas Stock" no se confunda con "Stock Global"
+if modo == "🚨 Alertas Stock":
+    st.header("🚨 Reposición Urgente (Stock Bajo)")
+    
+    # Slider para definir qué es stock bajo
+    limite = st.slider("Mostrar productos con stock menor o igual a:", 0, 15, 5)
+    
+    # Filtrar: Quitamos el Taller y filtramos por el límite
+    df_alertas = df[(df['local'].str.upper() != "TALLER") & (df['stock'] <= limite)]
+    
+    if not df_alertas.empty:
+        st.error(f"⚠️ Se encontraron {len(df_alertas)} variantes para reponer.")
+        
+        # Mostrar tabla limpia
+        st.dataframe(
+            df_alertas[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock'),
+            width='stretch'
+        )
+        
+        # Generar lista para copiar a WhatsApp
+        texto_ws = "REPOSICIÓN GUIZADO & MODA:\n"
+        for _, r in df_alertas.iterrows():
+            texto_ws += f"- {r['prenda']} {r['color']} T{r['talla']} en {r['local']} (Quedan: {int(r['stock'])})\n"
+        
+        st.text_area("Copia esto para pedir al taller:", value=texto_ws, height=200)
+    else:
+        st.success("✅ ¡Todo bien! No hay productos por debajo del límite en las tiendas.")
+
+elif "Stock" in modo:
+    # AQUÍ VA TU CÓDIGO DE INVENTARIO NORMAL (EL QUE TIENE LOS BOTONES FIX Y GUARDAR)
+    st.header(f"📦 Inventario {st.session_state.tienda_asignada if st.session_state.role == 'user' else 'Global'}")
+    
 # --- 5. MODO: TRASLADOS ---
 elif "Traslado" in modo:
     st.header("🚚 Traslados")
