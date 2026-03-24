@@ -46,7 +46,6 @@ def cargar_datos():
 def registrar_log(tipo, local, prenda, talla, color, cant):
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-        # Intenta leer el historial, si no existe o falla, crea un DF vacío
         try:
             logs = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
         except:
@@ -96,7 +95,6 @@ if modo == "📦 Stock Tiendas":
     df_p = df_l[df_l['prenda'] == prenda_sel]
     talla_sel = st.radio("📏 Talla:", sorted(df_p['talla'].unique()), horizontal=True)
     
-    # Ordenamiento: Con stock (A-Z) primero, Agotados (A-Z) después
     df_talla = df_p[df_p['talla'] == talla_sel].copy()
     df_talla['prioridad'] = df_talla['stock'].apply(lambda x: 1 if x > 0 else 0)
     df_ord = df_talla.sort_values(by=['prioridad', 'color'], ascending=[False, True])
@@ -104,16 +102,12 @@ if modo == "📦 Stock Tiendas":
     for idx, row in df_ord.iterrows():
         st.divider()
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-        
         color_txt = row['color'].upper()
         if row['stock'] <= 0:
             c1.markdown(f"**{color_txt}** <br><span style='color:red; font-size:12px;'>AGOTADO</span>", unsafe_allow_html=True)
         else:
             c1.write(f"**{color_txt}**")
-            
         c2.metric("Stock Actual", int(row['stock']))
-        
-        # Ajuste rápido (Venta/Ingreso)
         adj = c3.number_input("Venta/Ajuste (+/-)", value=0, key=f"adj_{idx}")
         if c3.button("Guardar", key=f"btn_v_{idx}"):
             df.at[idx, 'stock'] += adj
@@ -121,8 +115,6 @@ if modo == "📦 Stock Tiendas":
             registrar_log("Venta/Ajuste", local_sel, prenda_sel, talla_sel, row['color'], adj)
             st.cache_data.clear()
             st.rerun()
-            
-        # Corrección Manual (Solo Admin)
         if st.session_state.role == "admin":
             fix = c4.number_input("Corregir a:", value=int(row['stock']), key=f"fix_{idx}")
             if c4.button("Fix Total", key=f"btn_f_{idx}"):
@@ -139,53 +131,39 @@ elif modo == "🚚 Traslados":
     c1, c2 = st.columns(2)
     orig = c1.selectbox("Desde:", sorted(df['local'].unique()))
     dest = c2.selectbox("Hacia:", [l for l in sorted(df['local'].unique()) if l != orig])
-    
-    # Solo mostrar colores que tengan stock en el origen
     df_o = df[(df['local'] == orig) & (df['stock'] > 0)]
-    
     if not df_o.empty:
         p_t = st.selectbox("Prenda:", sorted(df_o['prenda'].unique()))
-        df_p_o = df_o[df_o['prenda'] == p_t]
-        t_t = st.selectbox("Talla:", sorted(df_p_o['talla'].unique()))
-        c_t = st.selectbox("Color disponible:", sorted(df_p_o[df_p_o['talla'] == t_t]['color'].unique()))
-        
-        fila_o = df_p_o[(df_p_o['talla'] == t_t) & (df_p_o['color'] == c_t)].iloc[0]
+        t_t = st.selectbox("Talla:", sorted(df_o[df_o['prenda'] == p_t]['talla'].unique()))
+        c_t = st.selectbox("Color:", sorted(df_o[(df_o['prenda'] == p_t) & (df_o['talla'] == t_t)]['color'].unique()))
+        fila_o = df[(df['local'] == orig) & (df['prenda'] == p_t) & (df['talla'] == t_t) & (df['color'] == c_t)].iloc[0]
         max_t = int(fila_o['stock'])
-        
-        st.info(f"Stock disponible en {orig}: {max_t}")
-        cant = st.number_input("Cantidad a trasladar:", min_value=1, max_value=max_t, value=1)
-        
+        st.info(f"Stock disponible: {max_t}")
+        cant = st.number_input("Cantidad:", min_value=1, max_value=max_t, value=1)
         if st.button("🚀 Confirmar Traslado"):
             df.at[fila_o.name, 'stock'] -= cant
-            # Buscar en destino
             idx_dest = df[(df['local'] == dest) & (df['prenda'] == p_t) & (df['talla'] == t_t) & (df['color'] == c_t)].index
-            if not idx_dest.empty:
-                df.at[idx_dest[0], 'stock'] += cant
+            if not idx_dest.empty: df.at[idx_dest[0], 'stock'] += cant
             else:
                 nueva = {'local': dest, 'prenda': p_t, 'talla': t_t, 'color': c_t, 'stock': cant}
                 df = pd.concat([df, pd.DataFrame([nueva])], ignore_index=True)
-            
             conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-            registrar_log("Traslado", f"{orig} -> {dest}", p_t, t_t, c_t, cant)
-            st.success("Traslado completado.")
+            registrar_log("Traslado", f"{orig}->{dest}", p_t, t_t, c_t, cant)
             st.cache_data.clear()
             st.rerun()
-    else:
-        st.warning(f"No hay stock disponible en {orig} para trasladar.")
+    else: st.warning(f"No hay stock en {orig}.")
 
 # --- 6. MODO: TALLER (ADMIN) ---
 elif modo == "🏭 Taller":
     st.header("🏭 Gestión de Producción")
-    t1, t2 = st.tabs(["📥 Reponer Stock (Existente)", "➕ Nueva Prenda/Color"])
-    
+    t1, t2 = st.tabs(["📥 Reponer Stock", "➕ Nueva Prenda/Color"])
     with t1:
         df_tall = df[df['local'] == "Taller"]
         if not df_tall.empty:
             p_ex = st.selectbox("Modelo:", sorted(df_tall['prenda'].unique()))
-            df_p_ex = df_tall[df_tall['prenda'] == p_ex]
-            t_ex = st.selectbox("Talla:", sorted(df_p_ex['talla'].unique()), key="tex")
-            c_ex = st.selectbox("Color:", sorted(df_p_ex[df_p_ex['talla'] == t_ex]['color'].unique()), key="cex")
-            cant_r = st.number_input("Cantidad producida:", min_value=1, value=1, key="crep")
+            t_ex = st.selectbox("Talla:", sorted(df_tall[df_tall['prenda'] == p_ex]['talla'].unique()), key="tex")
+            c_ex = st.selectbox("Color:", sorted(df_tall[(df_tall['prenda'] == p_ex) & (df_tall['talla'] == t_ex)]['color'].unique()), key="cex")
+            cant_r = st.number_input("Cantidad:", min_value=1, value=1, key="crep")
             if st.button("📥 Sumar a Taller"):
                 idx = df[(df['local']=="Taller") & (df['prenda']==p_ex) & (df['talla']==t_ex) & (df['color']==c_ex)].index[0]
                 df.at[idx, 'stock'] += cant_r
@@ -193,17 +171,14 @@ elif modo == "🏭 Taller":
                 registrar_log("Producción", "Taller", p_ex, t_ex, c_ex, cant_r)
                 st.cache_data.clear()
                 st.rerun()
-    
     with t2:
         es_nuevo_mod = st.checkbox("¿Es un modelo totalmente nuevo?")
-        modelos = sorted(df['prenda'].unique())
         with st.form("form_taller"):
-            np = st.text_input("Nombre de Prenda").upper() if es_nuevo_mod else st.selectbox("Modelo:", modelos)
+            np = st.text_input("Nombre de Prenda").upper() if es_nuevo_mod else st.selectbox("Modelo:", sorted(df['prenda'].unique()))
             nta = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
             nc = st.text_input("Nuevo Color").upper()
             ns = st.number_input("Stock Inicial", min_value=1)
-            if st.form_submit_button("➕ Crear y Registrar"):
-                # Verificar duplicado
+            if st.form_submit_button("➕ Crear"):
                 if not df[(df['local']=='Taller') & (df['prenda']==np) & (df['talla']==nta) & (df['color']==nc)].empty:
                     st.error("Ya existe. Usa 'Reponer Stock'.")
                 else:
@@ -219,24 +194,16 @@ elif modo == "📜 Historial y Filtros":
     st.header("📊 Análisis de Movimientos")
     h_df = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], worksheet="historial", ttl=0)
     h_df['fecha_dt'] = pd.to_datetime(h_df['fecha'], format='%d/%m/%Y')
-    
     c1, c2 = st.columns(2)
     rango = c1.date_input("Filtrar Días:", [datetime.now(), datetime.now()])
     loc_fil = c2.selectbox("Local:", ["TODOS"] + sorted(h_df['local'].unique().tolist()))
-    
     if len(rango) == 2:
         h_f = h_df[(h_df['fecha_dt'].dt.date >= rango[0]) & (h_df['fecha_dt'].dt.date <= rango[1])]
         if loc_fil != "TODOS": h_f = h_f[h_f['local'] == loc_fil]
-        
-        # Gráfico
         if not h_f.empty:
             vtas = h_f[h_f['tipo'] == "Venta/Ajuste"]
             if not vtas.empty:
-                st.plotly_chart(px.bar(vtas.groupby('prenda')['cantidad'].sum().abs().reset_index(), 
-                                       x='prenda', y='cantidad', title="Modelos más pedidos"), use_container_width=True)
-        
-        csv = h_f.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Descargar Reporte CSV", csv, "reporte.csv", "text/csv")
+                st.plotly_chart(px.bar(vtas.groupby('prenda')['cantidad'].sum().abs().reset_index(), x='prenda', y='cantidad', title="Modelos más pedidos"), use_container_width=True)
         st.dataframe(h_f.sort_values(by=['fecha_dt', 'hora'], ascending=False), use_container_width=True)
 
 # --- 8. MODO: ALERTAS (ADMIN) ---
@@ -247,5 +214,4 @@ elif modo == "🚨 Alertas Stock":
     if not criticos.empty:
         st.warning(f"Se encontraron {len(criticos)} variantes con stock crítico.")
         st.table(criticos[['local', 'prenda', 'talla', 'color', 'stock']])
-    else:
-        st.success("¡Todo el stock está bien!")
+    else: st.success("¡Todo el stock está bien!")
