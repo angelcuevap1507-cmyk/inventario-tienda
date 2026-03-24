@@ -174,24 +174,26 @@ elif modo == "📜 Historial":
 elif modo == "🚨 Alertas Stock":
     st.header("🚨 Reposición Urgente")
     
-    # Sliders para que tú mismo definas qué es "bajo"
-    c_lim, c_adv = st.columns(2)
-    limit_crit = c_lim.slider("🔴 Nivel Crítico (Menor a):", 1, 5, 2)
-    limit_warn = c_adv.slider("🟠 Nivel Advertencia (Menor a):", 6, 15, 8)
+    # Esto define qué tan "vacío" debe estar algo para que sea alerta
+    limite = st.sidebar.slider("Ver productos con menos de:", 1, 20, 5)
     
-    # Filtrar (Excluyendo Taller)
-    tiendas_df = df[df['local'].str.upper() != "TALLER"]
+    # Filtramos: Solo tiendas (no Taller) y solo lo que esté debajo del límite
+    df_alertas = df[(df['local'].str.upper() != "TALLER") & (df['stock'] <= limite)]
     
-    criticos = tiendas_df[tiendas_df['stock'] < limit_crit]
-    advertencia = tiendas_df[(tiendas_df['stock'] >= limit_crit) & (tiendas_df['stock'] <= limit_warn)]
-    
-    if not criticos.empty:
-        st.error(f"⚠️ ¡URGENTE! {len(criticos)} variantes en nivel crítico.")
-        st.dataframe(criticos[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock'), width='stretch')
-    
-    if not advertencia.empty:
-        st.warning(f"💡 REVISIÓN: {len(advertencia)} variantes por agotarse pronto.")
-        st.dataframe(advertencia[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock'), width='stretch')
-    
-    if criticos.empty and advertencia.empty:
-        st.success("✅ Todo el stock está en niveles saludables.")
+    if not df_alertas.empty:
+        st.error(f"⚠️ Tienes {len(df_alertas)} productos que necesitan reposición inmediata.")
+        
+        # Agrupamos para que sea más fácil de leer que el inventario normal
+        resumen_alertas = df_alertas[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock')
+        
+        # Mostramos una tabla limpia, sin botones de "Venta" o "Fix", solo para lectura
+        st.dataframe(resumen_alertas, width='stretch')
+        
+        # Botón extra: Copiar lista para WhatsApp
+        texto_pedido = "Lista de Reposición Guizado & Moda:\n"
+        for _, row in resumen_alertas.iterrows():
+            texto_pedido += f"- {row['prenda']} ({row['color']} Talla {row['talla']}) en {row['local']}: Quedan {int(row['stock'])}\n"
+        
+        st.text_area("Copia esto para mandarlo al Taller:", valor=texto_pedido, height=150)
+    else:
+        st.success("✅ ¡Excelente! Todas tus tiendas tienen stock suficiente por ahora.")
