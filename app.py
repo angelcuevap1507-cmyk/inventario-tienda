@@ -193,13 +193,58 @@ elif modo == "🏭 Taller":
                         st.rerun()
                 else:
                     st.warning("Por favor completa el nombre y el color.")
-                    
-# --- 7. MODO: VER HISTORIAL ---
+
+# --- 7. MODO: VER HISTORIAL (ACTUALIZADO CON FILTROS POR DÍA) ---
 elif modo == "📜 Ver Historial":
-    st.header("📜 Historial de Movimientos")
+    st.header("📜 Registro de Movimientos")
+    
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
         h_df = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
-        st.dataframe(h_df.sort_index(ascending=False), use_container_width=True)
-    except:
-        st.warning("Crea la hoja 'historial' en tu Excel.")
+        
+        # Convertir la columna 'fecha' a formato datetime para poder filtrar
+        h_df['fecha_dt'] = pd.to_datetime(h_df['fecha'], format='%d/%m/%Y')
+        
+        # --- FILTROS EN BARRA SUPERIOR ---
+        c1, c2 = st.columns(2)
+        with c1:
+            fecha_rango = st.date_input("Selecciona el rango de días:", 
+                                       value=[datetime.now(), datetime.now()])
+        with c2:
+            locales_hist = ["TODOS"] + sorted(h_df['local'].unique().tolist())
+            local_filtro = st.selectbox("Filtrar por Local:", locales_hist)
+
+        # Aplicar Filtros
+        if len(fecha_rango) == 2:
+            f_inicio, f_fin = fecha_rango
+            mask = (h_df['fecha_dt'].dt.date >= f_inicio) & (h_df['fecha_dt'].dt.date <= f_fin)
+            h_filtrado = h_df[mask]
+        else:
+            h_filtrado = h_df
+
+        if local_filtro != "TODOS":
+            h_filtrado = h_filtrado[h_filtrado['local'] == local_filtro]
+
+        # --- RESUMEN Y DESCARGA ---
+        total_movido = h_filtrado['cantidad'].abs().sum() # Usamos valor absoluto para contar piezas totales
+        st.info(f"📊 **Resumen del periodo:** Se movieron {int(total_movido)} prendas en total.")
+
+        col_down, _ = st.columns([1, 3])
+        csv = h_filtrado.drop(columns=['fecha_dt']).to_csv(index=False).encode('utf-8')
+        col_down.download_button(
+            label="📥 Descargar este reporte (CSV)",
+            data=csv,
+            file_name=f"historial_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime='text/csv'
+        )
+
+        # Mostrar Tabla (Ordenada por lo más reciente primero)
+        st.dataframe(
+            h_filtrado.drop(columns=['fecha_dt']).sort_values(by=['fecha', 'hora'], ascending=False), 
+            use_container_width=True
+        )
+
+    except Exception as e:
+        st.error(f"Error al cargar historial: {e}")
+        st.warning("Asegúrate de que la hoja 'historial' tenga las columnas: fecha, hora, tipo, local, prenda, talla, color, cantidad")
+        
