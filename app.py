@@ -240,4 +240,12 @@ elif modo == "📜 Historial y Filtros":
         st.dataframe(h_f.sort_values(by=['fecha_dt', 'hora'], ascending=False), use_container_width=True)
 
 # --- 8. MODO: ALERTAS (ADMIN) ---
-elif modo
+elif modo == "🚨 Alertas Stock":
+    st.header("🚨 Reposición Urgente")
+    limite = st.slider("Avisar si el stock es menor a:", 1, 10, 3)
+    criticos = df[(df['stock'] <= limite) & (df['local'] != "Taller")]
+    if not criticos.empty:
+        st.warning(f"Se encontraron {len(criticos)} variantes con stock crítico.")
+        st.table(criticos[['local', 'prenda', 'talla', 'color', 'stock']])
+    else:
+        st.success("¡Todo el stock está bien!")
