@@ -135,43 +135,65 @@ elif modo == "🚚 Traslados":
             st.cache_data.clear()
             st.rerun()
 
-# --- 6. MODO: TALLER ---
+# --- 6. MODO: TALLER (ACTUALIZADO CON SELECCIÓN DE MODELO) ---
 elif modo == "🏭 Taller":
     st.header("🏭 Gestión de Producción")
-    tab1, tab2 = st.tabs(["📥 Reponer Stock", "➕ Nueva Prenda"])
+    tab1, tab2 = st.tabs(["📥 Reponer Stock", "➕ Nueva Prenda / Color"])
     
     with tab1:
+        st.subheader("Sumar stock a algo que ya existe en Taller")
         df_taller = df[df['local'] == "Taller"]
         if not df_taller.empty:
-            p_ex = st.selectbox("Modelo:", sorted(df_taller['prenda'].unique()))
+            p_ex = st.selectbox("Modelo:", sorted(df_taller['prenda'].unique()), key="rep_p")
             df_p_ex = df_taller[df_taller['prenda'] == p_ex]
-            t_ex = st.selectbox("Talla:", sorted(df_p_ex['talla'].unique()), key="t_ex_rep")
-            c_ex = st.selectbox("Color:", sorted(df_p_ex[df_p_ex['talla'] == t_ex]['color'].unique()), key="c_ex_rep")
-            cant_rep = st.number_input("Cantidad:", min_value=1, value=1)
-            if st.button("📥 Sumar"):
+            t_ex = st.selectbox("Talla:", sorted(df_p_ex['talla'].unique()), key="rep_t")
+            c_ex = st.selectbox("Color:", sorted(df_p_ex[df_p_ex['talla'] == t_ex]['color'].unique()), key="rep_c")
+            cant_rep = st.number_input("Cantidad a sumar:", min_value=1, value=1)
+            
+            if st.button("📥 Confirmar Ingreso"):
                 idx_rep = df[(df['local'] == "Taller") & (df['prenda'] == p_ex) & (df['talla'] == t_ex) & (df['color'] == c_ex)].index[0]
                 df.at[idx_rep, 'stock'] += cant_rep
                 conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
                 registrar_log("Producción", "Taller", p_ex, t_ex, c_ex, cant_rep)
-                st.success("Stock añadido")
+                st.success("¡Stock actualizado!")
                 st.cache_data.clear()
                 st.rerun()
 
     with tab2:
-        with st.form("crear_taller_nuevo"):
-            np = st.text_input("Nombre de Prenda").upper()
-            nta = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
-            nc = st.text_input("Color").upper()
-            ns = st.number_input("Stock Inicial", min_value=1)
-            if st.form_submit_button("➕ Crear"):
-                nf = {'local': 'Taller', 'prenda': np, 'talla': nta, 'color': nc, 'stock': ns}
-                df = pd.concat([df, pd.DataFrame([nf])], ignore_index=True)
-                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                registrar_log("Nuevo Modelo", "Taller", np, nta, nc, ns)
-                st.success("Creado")
-                st.cache_data.clear()
-                st.rerun()
+        st.subheader("Registrar nuevo modelo o nuevo color")
+        
+        # Opción para decidir si es modelo nuevo o existente
+        modelos_existentes = sorted(df['prenda'].unique())
+        es_nuevo_modelo = st.checkbox("¿Es un modelo TOTALMENTE NUEVO? (No está en la lista)")
 
+        with st.form("crear_taller_nuevo"):
+            if es_nuevo_modelo:
+                np = st.text_input("Escribe el nombre del NUEVO modelo").upper()
+            else:
+                np = st.selectbox("Selecciona el modelo existente:", modelos_existentes)
+            
+            nta = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
+            nc = st.text_input("Color nuevo a registrar").upper()
+            ns = st.number_input("Stock inicial", min_value=1)
+            
+            if st.form_submit_button("➕ Registrar en Taller"):
+                if np and nc:
+                    # Verificar si ya existe esa combinación para no duplicar filas
+                    existe = df[(df['local'] == 'Taller') & (df['prenda'] == np) & (df['talla'] == nta) & (df['color'] == nc)]
+                    
+                    if not existe.empty:
+                        st.error("Este modelo/talla/color ya existe. Usa la pestaña 'Reponer Stock'.")
+                    else:
+                        nf = {'local': 'Taller', 'prenda': np, 'talla': nta, 'color': nc, 'stock': ns}
+                        df = pd.concat([df, pd.DataFrame([nf])], ignore_index=True)
+                        conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
+                        registrar_log("Nuevo Ingreso", "Taller", np, nta, nc, ns)
+                        st.success(f"Registrado: {np} - {nc}")
+                        st.cache_data.clear()
+                        st.rerun()
+                else:
+                    st.warning("Por favor completa el nombre y el color.")
+                    
 # --- 7. MODO: VER HISTORIAL ---
 elif modo == "📜 Ver Historial":
     st.header("📜 Historial de Movimientos")
