@@ -4,9 +4,10 @@ import pandas as pd
 from datetime import datetime
 import plotly.express as px
 
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="Guizado & Moda - Sistema Pro", layout="wide")
 
+# --- ESTADO DE SESIÓN ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.role = None
@@ -39,7 +40,7 @@ if not st.session_state.logged_in:
                     st.rerun()
     st.stop()
 
-# --- 2. CONEXIÓN ---
+# --- 2. CONEXIÓN A GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos():
@@ -88,6 +89,8 @@ with st.sidebar:
         st.rerun()
 
 # --- 4. MÓDULOS ---
+
+# MODULO: ALERTAS
 if modo == "🚨 Alertas Stock":
     st.header("🚨 Reposición Urgente")
     limite = st.slider("Ver productos con stock igual o menor a:", 0, 15, 5)
@@ -96,10 +99,11 @@ if modo == "🚨 Alertas Stock":
         st.error(f"Se encontraron {len(df_alertas)} variantes bajas.")
         st.dataframe(df_alertas[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock'), width='stretch')
     else:
-        st.success("✅ Stock OK.")
+        st.success("✅ Stock en tiendas está en niveles óptimos.")
 
+# MODULO: STOCK
 elif "Stock" in modo:
-    st.header("📦 Inventario")
+    st.header("📦 Inventario Actual")
     l_sel = st.session_state.tienda_asignada if st.session_state.role == "user" else st.selectbox("📍 Local:", sorted(df['local'].unique()))
     df_l = df[df['local'].str.upper() == l_sel.upper()]
     if not df_l.empty:
@@ -127,8 +131,9 @@ elif "Stock" in modo:
                     st.cache_data.clear()
                     st.rerun()
 
+# MODULO: TRASLADOS
 elif modo == "🚚 Traslados":
-    st.header("🚚 Traslados")
+    st.header("🚚 Envío de Mercadería")
     orig = st.session_state.tienda_asignada if st.session_state.role == "user" else st.selectbox("Desde:", sorted(df['local'].unique()))
     dest = st.selectbox("Hacia:", [l for l in sorted(df['local'].unique()) if l != orig])
     df_o = df[(df['local'].str.upper() == orig.upper()) & (df['stock'] > 0)]
@@ -138,7 +143,7 @@ elif modo == "🚚 Traslados":
         c = st.selectbox("Color:", sorted(df_o[(df_o['prenda']==p) & (df_o['talla']==t)]['color'].unique()))
         f_o = df[(df['local'].str.upper()==orig.upper()) & (df['prenda']==p) & (df['talla']==t) & (df['color']==c)].iloc[0]
         cant = st.number_input("Cantidad:", min_value=1, max_value=int(f_o['stock']), value=1)
-        if st.button("Confirmar"):
+        if st.button("Confirmar Traslado"):
             df.at[f_o.name, 'stock'] -= cant
             idx_d = df[(df['local'].str.upper()==dest.upper()) & (df['prenda']==p) & (df['talla']==t) & (df['color']==c)].index
             if not idx_d.empty:
@@ -150,9 +155,11 @@ elif modo == "🚚 Traslados":
             st.cache_data.clear()
             st.rerun()
 
+# MODULO: TALLER (CARGA MASIVA)
 elif modo == "🏭 Taller":
-    st.header("🏭 Taller")
-    t1, t2 = st.tabs(["Reponer", "Nuevo"])
+    st.header("🏭 Producción y Colecciones")
+    t1, t2 = st.tabs(["📥 Reponer Existentes", "➕ Nuevo Modelo (Carga Masiva)"])
+    
     with t1:
         dt = df[df['local'].str.upper() == "TALLER"]
         if not dt.empty:
@@ -164,25 +171,44 @@ elif modo == "🏭 Taller":
                 idx = df[(df['local'].str.upper()=="TALLER") & (df['prenda']==p) & (df['talla']==t) & (df['color']==c)].index[0]
                 df.at[idx, 'stock'] += can
                 conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                st.cache_data.clear()
-                st.rerun()
-    with t2:
-        with st.form("n_p"):
-            np = st.text_input("Nombre").upper()
-            nta = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
-            nc = st.text_input("Color").upper()
-            ns = st.number_input("Stock", min_value=1)
-            if st.form_submit_button("Crear"):
-                df = pd.concat([df, pd.DataFrame([{'local':'TALLER', 'prenda':np, 'talla':nta, 'color':nc, 'stock':ns}])], ignore_index=True)
-                conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
+                registrar_log("Producción", "Taller", p, t, c, can)
                 st.cache_data.clear()
                 st.rerun()
 
+    with t2:
+        st.subheader("📝 Registro Rápido de Colores")
+        with st.form("form_masivo"):
+            col_p, col_t = st.columns(2)
+            n_prenda = col_p.text_input("Nombre de Prenda").upper()
+            n_talla = col_t.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
+            
+            st.write("🎨 **Colores y Cantidades**")
+            data_nuevos = []
+            for i in range(10): # 10 filas para llenar rápido
+                c1, c2 = st.columns([3, 2])
+                col_name = c1.text_input(f"Color {i+1}", key=f"c_{i}", label_visibility="collapsed").upper()
+                col_qty = c2.number_input(f"Cant {i+1}", min_value=0, value=0, key=f"q_{i}", label_visibility="collapsed")
+                if col_name and col_qty > 0:
+                    data_nuevos.append({'local': 'TALLER', 'prenda': n_prenda, 'talla': n_talla, 'color': col_name, 'stock': col_qty})
+            
+            if st.form_submit_button("🚀 Crear todas las prendas"):
+                if n_prenda and data_nuevos:
+                    df = pd.concat([df, pd.DataFrame(data_nuevos)], ignore_index=True)
+                    conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
+                    for item in data_nuevos:
+                        registrar_log("Nuevo", "Taller", item['prenda'], item['talla'], item['color'], item['stock'])
+                    st.success(f"✅ {len(data_nuevos)} variantes creadas.")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error("Falta nombre o colores.")
+
+# MODULO: HISTORIAL
 elif modo == "📜 Historial":
-    st.header("📜 Historial")
+    st.header("📜 Auditoría")
     try:
         h = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], worksheet="historial", ttl=0)
         st.dataframe(h.iloc[::-1], width='stretch')
     except:
-        st.warning("Sin historial.")
-    
+        st.warning("No hay datos en el historial.")
+        
