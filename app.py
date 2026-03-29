@@ -2,12 +2,10 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
-import plotly.express as px
 
-# 1. CONFIGURACIÓN DE PÁGINA
+# 1. CONFIGURACIÓN
 st.set_page_config(page_title="Guizado & Moda - Sistema Pro", layout="wide")
 
-# --- ESTADO DE SESIÓN ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.role = None
@@ -23,143 +21,139 @@ if not st.session_state.logged_in:
             p = st.text_input("Contraseña", type="password").strip()
             if st.form_submit_button("Entrar"):
                 if u == "lachi" and p == "admin2026":
-                    st.session_state.logged_in = True
-                    st.session_state.role = "admin"
+                    st.session_state.logged_in, st.session_state.role = True, "admin"
                 elif u == "moda" and p == "moda2026":
-                    st.session_state.logged_in = True
-                    st.session_state.role = "user"
-                    st.session_state.tienda_asignada = "MODA"
+                    st.session_state.logged_in, st.session_state.role, st.session_state.tienda_asignada = True, "user", "MODA"
                 elif u == "guizado" and p == "guizado2026":
-                    st.session_state.logged_in = True
-                    st.session_state.role = "user"
-                    st.session_state.tienda_asignada = "GUIZADO"
-                else:
-                    st.error("Credenciales incorrectas")
-                
-                if st.session_state.logged_in:
-                    st.rerun()
+                    st.session_state.logged_in, st.session_state.role, st.session_state.tienda_asignada = True, "user", "GUIZADO"
+                else: st.error("Credenciales incorrectas")
+                if st.session_state.logged_in: st.rerun()
     st.stop()
 
-# --- 2. CONEXIÓN A GOOGLE SHEETS ---
+# --- 2. CONEXIÓN ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos():
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
         data = conn.read(spreadsheet=url, ttl=0)
-        if data is None or data.empty:
-            return pd.DataFrame()
         data.columns = data.columns.str.strip().str.lower()
         return data
-    except:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 def registrar_log(tipo, local, prenda, talla, color, cant):
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-        try:
-            logs = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
-        except:
-            logs = pd.DataFrame(columns=["fecha", "hora", "tipo", "local", "prenda", "talla", "color", "cantidad"])
+        try: logs = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
+        except: logs = pd.DataFrame(columns=["fecha", "hora", "tipo", "local", "prenda", "talla", "color", "cantidad"])
         ahora = datetime.now()
-        nueva_fila = pd.DataFrame([{
-            "fecha": ahora.strftime("%d/%m/%Y"), "hora": ahora.strftime("%H:%M:%S"),
-            "tipo": tipo, "local": local, "prenda": prenda, 
-            "talla": talla, "color": color, "cantidad": cant
-        }])
-        conn.update(spreadsheet=url, worksheet="historial", data=pd.concat([logs, nueva_fila], ignore_index=True))
-    except:
-        pass
+        nueva = pd.DataFrame([{"fecha": ahora.strftime("%d/%m/%Y"), "hora": ahora.strftime("%H:%M:%S"), "tipo": tipo, "local": local, "prenda": prenda, "talla": talla, "color": color, "cantidad": cant}])
+        conn.update(spreadsheet=url, worksheet="historial", data=pd.concat([logs, nueva], ignore_index=True))
+    except: pass
 
 df = cargar_datos()
 
 # --- 3. BARRA LATERAL ---
 with st.sidebar:
     st.title(f"👤 {st.session_state.role.upper()}")
-    if st.session_state.role == "admin":
-        opciones = ["🚨 Alertas Stock", "📦 Stock Global", "🚚 Traslados", "🏭 Taller", "📜 Historial"]
-    else:
-        opciones = ["📦 Mi Stock", "🚚 Traslados"]
+    opciones = ["🚨 Alertas Stock", "📦 Stock Global", "🚚 Traslados", "🏭 Taller", "📜 Historial"] if st.session_state.role == "admin" else ["📦 Mi Stock", "🚚 Traslados"]
     modo = st.radio("Menú:", opciones)
-    if st.button("🔄 Refrescar"):
-        st.cache_data.clear()
-        st.rerun()
-    if st.button("🚪 Salir"):
-        st.session_state.logged_in = False
-        st.rerun()
+    if st.button("🔄 Refrescar"): st.cache_data.clear(); st.rerun()
+    if st.button("🚪 Salir"): st.session_state.logged_in = False; st.rerun()
 
 # --- 4. MÓDULOS ---
 
-# MODULO: ALERTAS
 if modo == "🚨 Alertas Stock":
     st.header("🚨 Reposición Urgente")
-    limite = st.slider("Ver productos con stock igual o menor a:", 0, 15, 5)
-    df_alertas = df[(df['local'].str.upper() != "TALLER") & (df['stock'] <= limite)]
-    if not df_alertas.empty:
-        st.error(f"Se encontraron {len(df_alertas)} variantes bajas.")
-        st.dataframe(df_alertas[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock'), width='stretch')
-    else:
-        st.success("✅ Stock en tiendas está en niveles óptimos.")
+    limite = st.slider("Stock crítico:", 0, 15, 5)
+    df_a = df[(df['local'].str.upper() != "TALLER") & (df['stock'] <= limite)]
+    st.dataframe(df_a[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock'), width='stretch')
 
-# MODULO: STOCK
 elif "Stock" in modo:
-    st.header("📦 Inventario Actual")
+    st.header("📦 Inventario")
     l_sel = st.session_state.tienda_asignada if st.session_state.role == "user" else st.selectbox("📍 Local:", sorted(df['local'].unique()))
     df_l = df[df['local'].str.upper() == l_sel.upper()]
     if not df_l.empty:
         p_sel = st.selectbox("👕 Prenda:", sorted(df_l['prenda'].unique()))
-        df_p = df_l[df_l['prenda'] == p_sel]
-        t_sel = st.radio("📏 Talla:", sorted(df_p['talla'].unique()), horizontal=True)
-        items = df_p[df_p['talla'] == t_sel].sort_values(by='color')
+        items = df_l[df_l['prenda'] == p_sel].sort_values(by=['talla', 'color'])
         for idx, row in items.iterrows():
             st.divider()
-            c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-            c1.write(f"**{row['color'].upper()}**")
+            c1, c2, c3 = st.columns([2, 1, 1])
+            c1.write(f"**{row['color'].upper()}** (Talla {row['talla']})")
             c2.metric("Stock", int(row['stock']))
             adj = c3.number_input("Venta", value=0, key=f"adj_{idx}")
             if c3.button("Guardar", key=f"b_{idx}"):
                 df.at[idx, 'stock'] += adj
                 conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                registrar_log("Venta", l_sel, p_sel, t_sel, row['color'], adj)
-                st.cache_data.clear()
-                st.rerun()
-            if st.session_state.role == "admin":
-                fix = c4.number_input("Fix", value=int(row['stock']), key=f"f_{idx}")
-                if c4.button("Fix", key=f"bf_{idx}"):
-                    df.at[idx, 'stock'] = fix
-                    conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                    st.cache_data.clear()
-                    st.rerun()
+                registrar_log("Venta", l_sel, p_sel, row['talla'], row['color'], adj)
+                st.cache_data.clear(); st.rerun()
 
-# MODULO: TRASLADOS
 elif modo == "🚚 Traslados":
-    st.header("🚚 Envío de Mercadería")
-    orig = st.session_state.tienda_asignada if st.session_state.role == "user" else st.selectbox("Desde:", sorted(df['local'].unique()))
-    dest = st.selectbox("Hacia:", [l for l in sorted(df['local'].unique()) if l != orig])
-    df_o = df[(df['local'].str.upper() == orig.upper()) & (df['stock'] > 0)]
-    if not df_o.empty:
-        p = st.selectbox("Prenda:", sorted(df_o['prenda'].unique()))
-        t = st.selectbox("Talla:", sorted(df_o[df_o['prenda']==p]['talla'].unique()))
-        c = st.selectbox("Color:", sorted(df_o[(df_o['prenda']==p) & (df_o['talla']==t)]['color'].unique()))
-        f_o = df[(df['local'].str.upper()==orig.upper()) & (df['prenda']==p) & (df['talla']==t) & (df['color']==c)].iloc[0]
-        cant = st.number_input("Cantidad:", min_value=1, max_value=int(f_o['stock']), value=1)
-        if st.button("Confirmar Traslado"):
-            df.at[f_o.name, 'stock'] -= cant
-            idx_d = df[(df['local'].str.upper()==dest.upper()) & (df['prenda']==p) & (df['talla']==t) & (df['color']==c)].index
-            if not idx_d.empty:
-                df.at[idx_d[0], 'stock'] += cant
-            else:
-                df = pd.concat([df, pd.DataFrame([{'local':dest.upper(), 'prenda':p, 'talla':t, 'color':c, 'stock':cant}])], ignore_index=True)
-            conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-            registrar_log("Traslado", f"{orig}->{dest}", p, t, c, cant)
-            st.cache_data.clear()
-            st.rerun()
-
-# MODULO: TALLER (CARGA MASIVA)
-elif modo == "🏭 Taller":
-    st.header("🏭 Producción y Colecciones")
-    t1, t2 = st.tabs(["📥 Reponer Existentes", "➕ Nuevo Modelo (Carga Masiva)"])
+    st.header("🚚 Traslado Masivo")
+    c1, c2 = st.columns(2)
+    orig = c1.selectbox("Desde (Origen):", sorted(df['local'].unique()))
+    dest = c2.selectbox("Hacia (Destino):", [l for l in sorted(df['local'].unique()) if l != orig])
     
+    st.write(f"### 📋 Stock disponible en {orig}")
+    df_o = df[df['local'].str.upper() == orig.upper()].copy()
+    
+    if not df_o.empty:
+        # Buscador rápido
+        busqueda = st.text_input("🔍 Buscar prenda o color en origen:").upper()
+        if busqueda:
+            df_o = df_o[df_o['prenda'].str.contains(busqueda) | df_o['color'].str.contains(busqueda)]
+        
+        # Selección múltiple usando data_editor (la forma más rápida de marcar varios)
+        df_o['Seleccionar'] = False
+        df_o = df_o[['Seleccionar', 'prenda', 'talla', 'color', 'stock']]
+        
+        edited_df = st.data_editor(
+            df_o,
+            column_config={"Seleccionar": st.column_config.CheckboxColumn(default=False)},
+            disabled=["prenda", "talla", "color", "stock"],
+            hide_index=True,
+            width="stretch"
+        )
+        
+        seleccionados = edited_df[edited_df['Seleccionar'] == True]
+        
+        if not seleccionados.empty:
+            st.write("---")
+            st.write("### 📤 Cantidades a enviar")
+            items_a_mover = []
+            
+            for _, sel in seleccionados.iterrows():
+                cc1, cc2 = st.columns([3, 1])
+                cc1.write(f"**{sel['prenda']}** - {sel['color']} (Talla {sel['talla']})")
+                max_v = int(sel['stock'])
+                cant_env = cc2.number_input(f"Mover (Max {max_v})", min_value=1, max_value=max_v, value=1, key=f"mov_{sel.name}")
+                items_a_mover.append({"prenda": sel['prenda'], "talla": sel['talla'], "color": sel['color'], "cantidad": cant_env})
+            
+            if st.button("🚀 Confirmar Envío de Todo"):
+                url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+                for item in items_a_mover:
+                    # Restar al origen
+                    idx_o = df[(df['local'].str.upper()==orig.upper()) & (df['prenda']==item['prenda']) & (df['talla']==item['talla']) & (df['color']==item['color'])].index[0]
+                    df.at[idx_o, 'stock'] -= item['cantidad']
+                    
+                    # Sumar al destino (o crear si no existe)
+                    idx_d = df[(df['local'].str.upper()==dest.upper()) & (df['prenda']==item['prenda']) & (df['talla']==item['talla']) & (df['color']==item['color'])].index
+                    if not idx_d.empty:
+                        df.at[idx_d[0], 'stock'] += item['cantidad']
+                    else:
+                        nueva_fila = pd.DataFrame([{'local': dest.upper(), 'prenda': item['prenda'], 'talla': item['talla'], 'color': item['color'], 'stock': item['cantidad']}])
+                        df = pd.concat([df, nueva_fila], ignore_index=True)
+                    
+                    registrar_log("Traslado", f"{orig}->{dest}", item['prenda'], item['talla'], item['color'], item['cantidad'])
+                
+                conn.update(spreadsheet=url, data=df)
+                st.success(f"¡Traslado completado de {orig} a {dest}!")
+                st.cache_data.clear(); st.rerun()
+    else: st.warning("No hay stock en este local.")
+
+elif modo == "🏭 Taller":
+    st.header("🏭 Taller")
+    t1, t2 = st.tabs(["📥 Reponer", "➕ Nuevo Modelo (Carga Masiva)"])
     with t1:
         dt = df[df['local'].str.upper() == "TALLER"]
         if not dt.empty:
@@ -171,44 +165,26 @@ elif modo == "🏭 Taller":
                 idx = df[(df['local'].str.upper()=="TALLER") & (df['prenda']==p) & (df['talla']==t) & (df['color']==c)].index[0]
                 df.at[idx, 'stock'] += can
                 conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                registrar_log("Producción", "Taller", p, t, c, can)
-                st.cache_data.clear()
-                st.rerun()
-
+                st.cache_data.clear(); st.rerun()
     with t2:
-        st.subheader("📝 Registro Rápido de Colores")
-        with st.form("form_masivo"):
-            col_p, col_t = st.columns(2)
-            n_prenda = col_p.text_input("Nombre de Prenda").upper()
-            n_talla = col_t.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
-            
-            st.write("🎨 **Colores y Cantidades**")
+        with st.form("f_masivo"):
+            n_p = st.text_input("Nombre de Prenda").upper()
+            n_t = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
             data_nuevos = []
-            for i in range(10): # 10 filas para llenar rápido
+            for i in range(10):
                 c1, c2 = st.columns([3, 2])
-                col_name = c1.text_input(f"Color {i+1}", key=f"c_{i}", label_visibility="collapsed").upper()
-                col_qty = c2.number_input(f"Cant {i+1}", min_value=0, value=0, key=f"q_{i}", label_visibility="collapsed")
-                if col_name and col_qty > 0:
-                    data_nuevos.append({'local': 'TALLER', 'prenda': n_prenda, 'talla': n_talla, 'color': col_name, 'stock': col_qty})
-            
-            if st.form_submit_button("🚀 Crear todas las prendas"):
-                if n_prenda and data_nuevos:
+                col = c1.text_input(f"Color {i+1}", key=f"c_{i}", label_visibility="collapsed").upper()
+                qty = c2.number_input(f"Cant {i+1}", min_value=0, value=0, key=f"q_{i}", label_visibility="collapsed")
+                if col and qty > 0: data_nuevos.append({'local':'TALLER','prenda':n_p,'talla':n_t,'color':col,'stock':qty})
+            if st.form_submit_button("🚀 Crear todas"):
+                if n_p and data_nuevos:
                     df = pd.concat([df, pd.DataFrame(data_nuevos)], ignore_index=True)
                     conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                    for item in data_nuevos:
-                        registrar_log("Nuevo", "Taller", item['prenda'], item['talla'], item['color'], item['stock'])
-                    st.success(f"✅ {len(data_nuevos)} variantes creadas.")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.error("Falta nombre o colores.")
+                    st.cache_data.clear(); st.rerun()
 
-# MODULO: HISTORIAL
 elif modo == "📜 Historial":
-    st.header("📜 Auditoría")
+    st.header("📜 Historial")
     try:
         h = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], worksheet="historial", ttl=0)
         st.dataframe(h.iloc[::-1], width='stretch')
-    except:
-        st.warning("No hay datos en el historial.")
-        
+    except: st.warning("Sin historial.")
