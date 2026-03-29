@@ -73,6 +73,7 @@ df = cargar_datos()
 # --- 3. BARRA LATERAL ---
 with st.sidebar:
     st.title(f"👤 {st.session_state.role.upper()}")
+    # Menú según rol de usuario
     opciones = ["🚨 Alertas Stock", "📦 Stock Global", "🚚 Traslados", "🏭 Taller", "📜 Historial"] if st.session_state.role == "admin" else ["📦 Mi Stock", "🚚 Traslados"]
     modo = st.radio("Menú:", opciones)
     if st.button("🔄 Refrescar Datos"):
@@ -87,12 +88,7 @@ with st.sidebar:
 # MÓDULO: STOCK
 if "Stock" in modo:
     st.header("📦 Inventario")
-    if st.session_state.role == "admin":
-        # sorted(df['local'].unique()) ahora devolverá solo "GUIZADO", "MODA" y "TALLER"
-        l_sel = st.selectbox("📍 Local:", sorted(df['local'].unique()))
-    else:
-        l_sel = st.session_state.tienda_asignada
-        
+    l_sel = st.session_state.tienda_asignada if st.session_state.role == "user" else st.selectbox("📍 Local:", sorted(df['local'].unique()))
     df_l = df[df['local'] == l_sel]
     
     if not df_l.empty:
@@ -110,7 +106,7 @@ if "Stock" in modo:
                 registrar_log("Venta", l_sel, p_sel, row['talla'], row['color'], adj)
                 st.cache_data.clear(); st.rerun()
 
-# MÓDULO: TRASLADOS
+# MÓDULO: TRASLADOS (Múltiple Selección)
 elif modo == "🚚 Traslados":
     st.header("🚚 Traslado Masivo")
     locales_disponibles = sorted(df['local'].unique())
@@ -148,7 +144,7 @@ elif modo == "🚚 Traslados":
                 conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
                 st.success("Traslado exitoso"); st.cache_data.clear(); st.rerun()
 
-# MÓDULO: TALLER (ADMIN)
+# MÓDULO: TALLER (Carga Masiva)
 elif modo == "🏭 Taller":
     st.header("🏭 Producción")
     t1, t2 = st.tabs(["📥 Reponer", "➕ Nuevo Modelo"])
