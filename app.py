@@ -39,9 +39,9 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def cargar_datos():
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-        # Leemos la primera pestaña (Inventario)
+        # Cargamos la primera pestaña (Inventario)
         data = conn.read(spreadsheet=url, ttl=0)
-        # Limpieza de columnas para evitar errores de mayúsculas/minúsculas
+        # Limpieza de nombres de columnas
         data.columns = [str(c).strip().lower() for c in data.columns]
         return data
     except Exception as e:
@@ -52,11 +52,10 @@ def registrar_log(tipo, local, prenda, talla, color, cant):
     try:
         url = st.secrets["connections"]["gsheets"]["spreadsheet"]
         try:
-            # Intentamos leer la pestaña 'historial'
+            # Leer pestaña 'historial'
             logs = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
             logs.columns = [str(c).strip().lower() for c in logs.columns]
         except:
-            # Si no existe, creamos la estructura
             logs = pd.DataFrame(columns=["fecha", "hora", "tipo", "local", "prenda", "talla", "color", "cantidad"])
         
         ahora = datetime.now()
@@ -70,7 +69,7 @@ def registrar_log(tipo, local, prenda, talla, color, cant):
         logs_updated = pd.concat([logs, nueva], ignore_index=True)
         conn.update(spreadsheet=url, worksheet="historial", data=logs_updated)
     except:
-        st.warning("No se pudo guardar en el historial. Revisa si existe la pestaña 'historial'.")
+        st.sidebar.warning("⚠️ Error al registrar en Historial.")
 
 df = cargar_datos()
 
@@ -100,7 +99,7 @@ if modo == "🚨 Alertas Stock":
         df_a = df[(df['local'].str.upper() != "TALLER") & (df['stock'] <= limite)]
         st.dataframe(df_a[['local', 'prenda', 'talla', 'color', 'stock']].sort_values(by='stock'), use_container_width=True)
     else:
-        st.error("Columnas de Excel no encontradas.")
+        st.info("No hay alertas de stock bajo.")
 
 elif "Stock" in modo:
     st.header("📦 Inventario")
@@ -115,8 +114,8 @@ elif "Stock" in modo:
             c1, c2, c3 = st.columns([2, 1, 1])
             c1.write(f"**{row['color'].upper()}** (Talla {row['talla']})")
             c2.metric("Stock", int(row['stock']))
-            adj = c3.number_input("Venta", value=0, key=f"adj_{idx}")
-            if c3.button("Guardar", key=f"b_{idx}"):
+            adj = c3.number_input("Venta (-)", value=0, key=f"adj_{idx}")
+            if c3.button("Registrar Venta", key=f"b_{idx}"):
                 df.at[idx, 'stock'] += adj
                 conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
                 registrar_log("Venta", l_sel, p_sel, row['talla'], row['color'], adj)
@@ -124,16 +123,16 @@ elif "Stock" in modo:
                 st.rerun()
 
 elif modo == "🚚 Traslados":
-    st.header("🚚 Traslado Múltiple")
+    st.header("🚚 Traslado Masivo")
     c1, c2 = st.columns(2)
     orig = c1.selectbox("Desde (Origen):", sorted(df['local'].unique()))
     dest = c2.selectbox("Hacia (Destino):", [l for l in sorted(df['local'].unique()) if l != orig])
     
     df_o = df[df['local'].str.upper() == orig.upper()].copy()
     if not df_o.empty:
-        st.write(f"### 📋 Stock en {orig} (Marca lo que vas a enviar)")
+        st.write(f"### 📋 Stock en {orig}")
         df_o['Seleccionar'] = False
-        # Editor de tabla con checkboxes
+        # Tabla con checkboxes
         edited_df = st.data_editor(
             df_o[['Seleccionar', 'prenda', 'talla', 'color', 'stock']],
             column_config={"Seleccionar": st.column_config.CheckboxColumn(default=False)},
@@ -168,14 +167,12 @@ elif modo == "🚚 Traslados":
                     registrar_log("Traslado", f"{orig}->{dest}", item['prenda'], item['talla'], item['color'], item['cantidad'])
                 
                 conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-                st.success("¡Traslado completado!")
+                st.success(f"¡Traslado de {orig} a {dest} exitoso!")
                 st.cache_data.clear()
                 st.rerun()
-    else:
-        st.warning("No hay stock en este local.")
 
 elif modo == "🏭 Taller":
-    st.header("🏭 Taller - Carga de Producción")
+    st.header("🏭 Taller - Producción")
     t1, t2 = st.tabs(["📥 Reponer Stock", "➕ Nuevo Modelo (Varios Colores)"])
     
     with t1:
@@ -199,7 +196,7 @@ elif modo == "🏭 Taller":
             nt = st.selectbox("Talla", ["ST", "S", "M", "L", "XL"])
             st.write("🎨 **Lista de Colores y Cantidades**")
             nuevos = []
-            for i in range(8):
+            for i in range(10): # Hasta 10 colores de golpe
                 c1, c2 = st.columns([3, 2])
                 col = c1.text_input(f"Color {i+1}", key=f"nc_{i}").upper()
                 qty = c2.number_input(f"Cantidad {i+1}", min_value=0, value=0, key=f"nq_{i}")
@@ -212,7 +209,7 @@ elif modo == "🏭 Taller":
                     conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
                     for n in nuevos:
                         registrar_log("Nuevo", "Taller", n['prenda'], n['talla'], n['color'], n['stock'])
-                    st.success(f"Creadas {len(nuevos)} variantes.")
+                    st.success(f"Creadas {len(nuevos)} variantes de {np}.")
                     st.cache_data.clear()
                     st.rerun()
 
@@ -223,4 +220,4 @@ elif modo == "📜 Historial":
         h = conn.read(spreadsheet=url, worksheet="historial", ttl=0)
         st.dataframe(h.iloc[::-1], use_container_width=True)
     except:
-        st.warning("No se encontró la pestaña 'historial' en el Excel.")
+        st.warning("No se encontró la pestaña 'historial' o está vacía.")
